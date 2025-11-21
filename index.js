@@ -3,7 +3,6 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const favicon = require('serve-favicon');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -15,9 +14,6 @@ const fs = require('fs');
 const jwtSecret = process.env.JWT_SECRET || "default_jwt_secret";
 const app = express();
 const PORT = process.env.PORT || 5500;
-
-// Favicon
-app.use(favicon(path.join(__dirname, 'public', 'favicon.ico')));
 
 // Connect to MongoDB
 const connectDB = async () => {
@@ -60,7 +56,7 @@ const User = mongoose.model(
 app.use(cors({ origin: '*' }));
 app.use(bodyParser.json());
 
-// Serve static files from public
+// Serve static files from /public
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Home route
@@ -186,7 +182,8 @@ app.get('/post/:id', async (req, res) => {
     return res.status(404).send('Post not found');
   }
 
-  fs.readFile(path.join(__dirname, 'post-detail.html'), 'utf8', (err, data) => {
+  // Corrected path (must read from /public)
+  fs.readFile(path.join(__dirname, 'public', 'post-detail.html'), 'utf8', (err, data) => {
     if (err) return res.status(500).send('Internal Server Error');
 
     const postDetailHtml = data
@@ -202,7 +199,7 @@ app.get('/post/:id', async (req, res) => {
 
 // Delete post
 app.delete('/posts/:id', authenticateJWT, async (req, res) => {
-  if (req.user.role == 'admin') {
+  if (req.user.role === 'admin') {
     try {
       await Post.findByIdAndDelete(req.params.id);
       res.status(200).send({ message: 'Post deleted' });
@@ -214,7 +211,7 @@ app.delete('/posts/:id', authenticateJWT, async (req, res) => {
   }
 });
 
-// Update Post
+// Update post
 app.put('/posts/:id', authenticateJWT, async (req, res) => {
   const { title, content } = req.body;
   const postId = req.params.id;
@@ -238,4 +235,5 @@ app.put('/posts/:id', authenticateJWT, async (req, res) => {
     res.status(500).send({ error: 'Internal Server Error' });
   }
 });
+
 
