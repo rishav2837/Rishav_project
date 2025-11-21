@@ -56,12 +56,12 @@ const User = mongoose.model(
 app.use(cors({ origin: '*' }));
 app.use(bodyParser.json());
 
-// Serve static files from /public
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve static files from ROOT directory
+app.use(express.static(__dirname));
 
 // Home route
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // JWT Authentication Middleware
@@ -182,8 +182,7 @@ app.get('/post/:id', async (req, res) => {
     return res.status(404).send('Post not found');
   }
 
-  // Corrected path (must read from /public)
-  fs.readFile(path.join(__dirname, 'public', 'post-detail.html'), 'utf8', (err, data) => {
+  fs.readFile(path.join(__dirname, 'post-detail.html'), 'utf8', (err, data) => {
     if (err) return res.status(500).send('Internal Server Error');
 
     const postDetailHtml = data
@@ -235,5 +234,6 @@ app.put('/posts/:id', authenticateJWT, async (req, res) => {
     res.status(500).send({ error: 'Internal Server Error' });
   }
 });
+
 
 
