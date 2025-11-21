@@ -12,7 +12,7 @@ const mongoose = require('mongoose');
 const validator = require('validator');
 const fs = require('fs');
 
-const jwtSecret = process.env.JWT_SECRET;
+const jwtSecret = process.env.JWT_SECRET || "default_jwt_secret";
 const app = express();
 const PORT = process.env.PORT || 5500;
 
@@ -22,16 +22,16 @@ app.use(favicon(path.join(__dirname, 'public', 'favicon.ico')));
 // Connect to MongoDB
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-  } catch (error) {}
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log("MongoDB connected successfully");
+  } catch (error) {
+    console.error("MongoDB connection failed:", error);
+  }
 };
 
 connectDB().then(() => {
   app.listen(PORT, () => {
-    console.log(`Listening on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 });
 
@@ -59,40 +59,46 @@ const User = mongoose.model(
 // Middleware
 app.use(cors({ origin: '*' }));
 app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname)));
 
+// Serve static files from public
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Home route
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // JWT Authentication Middleware
 const authenticateJWT = (req, res, next) => {
-  const token = req.headers.authorization.split(' ')[1];
+  const authHeader = req.headers.authorization;
 
-  if (token) {
-    jwt.verify(token, jwtSecret, (err, user) => {
-      if (err) {
-        console.error('JWT Verification Error', err.message);
-        return res.sendStatus(403);
-      }
-      req.user = user;
-      next();
-    });
-  } else {
-    console.error('Token is missing');
-    res.sendStatus(401);
+  if (!authHeader) {
+    return res.status(401).json({ error: "Authorization header missing" });
   }
+
+  const token = authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: "Token missing" });
+  }
+
+  jwt.verify(token, jwtSecret, (err, user) => {
+    if (err) {
+      console.error("JWT Verification Error:", err.message);
+      return res.status(403).json({ error: "Invalid token" });
+    }
+    req.user = user;
+    next();
+  });
 };
 
 // User registration
 app.post('/register', async (req, res) => {
   const { username, password, role } = req.body;
 
-  // Sanitze and validate user input
-  const sanitizedUsername = validator.escape(username);
-  const sanitizedPassword = validator.escape(password);
+  const sanitizedUsername = validator.escape(username || "");
+  const sanitizedPassword = validator.escape(password || "");
 
-  // Ensure valid input data
   if (!sanitizedUsername || !sanitizedPassword) {
     return res.status(400).send({ error: 'Invalid input data' });
   }
@@ -102,7 +108,7 @@ app.post('/register', async (req, res) => {
   const newUser = new User({
     username: sanitizedUsername,
     password: hashedPassword,
-    role,
+    role: role || "user",
   });
 
   await newUser.save();
@@ -113,11 +119,9 @@ app.post('/register', async (req, res) => {
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
 
-  // Sanitze and validate user input
-  const sanitizedUsername = validator.escape(username);
-  const sanitizedPassword = validator.escape(password);
+  const sanitizedUsername = validator.escape(username || "");
+  const sanitizedPassword = validator.escape(password || "");
 
-  // Ensure valid input data
   if (!sanitizedUsername || !sanitizedPassword) {
     return res.status(400).send({ error: 'Invalid input data' });
   }
@@ -125,23 +129,23 @@ app.post('/login', async (req, res) => {
   const user = await User.findOne({ username: sanitizedUsername });
 
   if (user) {
-    if (bcrypt.compare(password, user.password)) {
+    const valid = await bcrypt.compare(password, user.password);
+
+    if (valid) {
       const accessToken = jwt.sign(
         { username: user.username, role: user.role },
-        process.env.JWT_SECRET,
-        {
-          expiresIn: '24h',
-        }
+        jwtSecret,
+        { expiresIn: '24h' }
       );
-      res
-        .status(200)
-        .send({ success: true, token: accessToken, role: user.role });
-    } else {
-      res.status(401).send({ success: false });
+
+      return res.status(200).send({
+        success: true,
+        token: accessToken,
+        role: user.role,
+      });
     }
-  } else {
-    res.status(401).send({ success: false });
   }
+  res.status(401).send({ success: false });
 });
 
 // Read all posts
@@ -150,6 +154,7 @@ app.get('/posts', async (req, res) => {
   res.status(200).send(posts);
 });
 
+// Create post
 app.post('/posts', authenticateJWT, async (req, res) => {
   if (req.user.role === 'admin') {
     const { title, content, imageUrl, author, timestamp } = req.body;
@@ -162,34 +167,28 @@ app.post('/posts', authenticateJWT, async (req, res) => {
       timestamp,
     });
 
-    newPost
-      .save()
-      .then((savedPost) => {
-        res.status(201).send(savedPost);
-      })
-      .catch((error) => {
-        res.status(500).send({ error: 'Internal Server Error' });
-      });
+    try {
+      const savedPost = await newPost.save();
+      res.status(201).send(savedPost);
+    } catch (error) {
+      res.status(500).send({ error: 'Internal Server Error' });
+    }
   } else {
     res.sendStatus(403);
   }
 });
 
+// View post detail
 app.get('/post/:id', async (req, res) => {
-  const postId = req.params.id;
-  const post = await Post.findById(postId);
+  const post = await Post.findById(req.params.id);
+
   if (!post) {
     return res.status(404).send('Post not found');
   }
 
-  // Read the HTML template from the file
   fs.readFile(path.join(__dirname, 'post-detail.html'), 'utf8', (err, data) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).send('Internal Server Error');
-    }
+    if (err) return res.status(500).send('Internal Server Error');
 
-    // Replace placeholders in th HTML with actual post data
     const postDetailHtml = data
       .replace(/\${post.imageUrl}/g, post.imageUrl)
       .replace(/\${post.title}/g, post.title)
@@ -239,3 +238,4 @@ app.put('/posts/:id', authenticateJWT, async (req, res) => {
     res.status(500).send({ error: 'Internal Server Error' });
   }
 });
+
